@@ -244,11 +244,11 @@ class Solver(object):
 		for f in self.switchToFlows[switch]:
 			if f.getAmount() > maxAmount:
 				maxFlow = f
-		amount = f.getAmount()
+		amount = maxFlow.getAmount()
 
 		# make sure that the maxFlow is covered by the VM
-		vm.addFlow(f)
-		host = f.getHost()
+		vm.addFlow(maxFlow)
+		host = maxFlow.getHost()
 		self.hostToVms.setdefault(host, [])
 
 		for f in self.switchToFlows[switch]:
