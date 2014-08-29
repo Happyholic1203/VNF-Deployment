@@ -102,6 +102,9 @@ class Flow(object):
 	def getHost(self):
 		return self.host
 
+	def __lt__(self, other):
+		return self.amount < other.amount
+
 	def __repr__(self):
 		return self.getName()
 
@@ -184,8 +187,8 @@ class Solver(object):
 		self.reset()
 
 		for h in tree.getHosts():
-			while h.getTotalFlowAmount() >= self.alpha:
-				self.coverHostWithVm(h)
+			while h.getTotalFlowAmount() >= self.alpha and self.coverHostWithVm(h):
+				pass
 			self.pushResidualFlowsToParent(h)
 
 		# bottom up
@@ -230,12 +233,20 @@ class Solver(object):
 		vm = VM()
 		self.hostToVms.setdefault(host, [])
 		amount = 0
-		for f in host.getFlows():
+		flows = []
+		for f in sorted(host.getFlows(), reverse=True):
 			if amount + f.getAmount() > 1:
 				break
 			amount += f.getAmount()
-			vm.addFlow(f)
-		self.hostToVms[host].append(vm)
+			flows.append(f)
+
+		if amount >= self.alpha:
+			for f in flows:
+				vm.addFlow(f)
+			self.hostToVms[host].append(vm)
+			return True
+		else:
+			return False
 
 	def coverSwitchWithVm(self, switch):
 		vm = VM()
@@ -263,11 +274,13 @@ class Solver(object):
 
 	def getSolution(self):
 		ret = ''
+		numVms = 0
 		for h in self.hostToVms.keys():
 			ret += 'host-%d' % h.id
 			ret += '\n\t'
 			ret += '%r\n' % self.hostToVms[h]
-		return ret
+			numVms += len(self.hostToVms[h])
+		return ret + '\nNumber of VMs: %d' % (numVms)
 
 
 if __name__ == '__main__':
@@ -295,8 +308,8 @@ if __name__ == '__main__':
 	hosts[4].addFlow(0.25)
 	hosts[4].addFlow(0.25)
 
-	hosts[5].addFlow(0.45)
-	hosts[5].addFlow(0.5)
+	hosts[5].addFlow(0.6)
+	hosts[5].addFlow(0.6)
 
 	hosts[6].addFlow(0.1)
 	hosts[6].addFlow(0.1)
