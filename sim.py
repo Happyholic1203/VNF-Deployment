@@ -79,6 +79,7 @@ class Flow(object):
 		self.amount = amount
 		self.vm = None
 		self.host = host
+		self.hops = [host]
 		self.id = Flow.__id
 		Flow.__id += 1
 
@@ -195,11 +196,13 @@ class Solver(object):
 		for height in reversed(range(tree.depth)):
 			for s in tree.getNodesAtHeight(height):
 				while self.getSwitchTotalFlowAmount(s) >= self.alpha:
+					# print self.getSwitchTotalFlowAmount(s)
 					self.coverSwitchWithVm(s)
 				if not s.isRoot():
 					self.pushResidualFlowsToParent(s)
 
 		if self.getSwitchTotalFlowAmount(tree.root) > 0:
+			print 'root: ',
 			self.coverSwitchWithVm(tree.root)
 
 	def getSwitchTotalFlowAmount(self, switch):
@@ -219,17 +222,20 @@ class Solver(object):
 			for f in node.getFlows():
 				if f.getAmount() > 0:
 					self.switchToFlows[parent].append(f)
+					# print 'pushing %s onto %s.hops' % (parent, f)
+					f.hops.append(parent)
 		else:
 			for f in self.switchToFlows[node]:
 				if f.getAmount() > 0:
 					self.switchToFlows[parent].append(f)
+					f.hops.append(parent)
 
 
 	# TODO: improve this function to provide optimal solution
 	# Flows can add up in many combinations, and one of them is closest
 	# to the alpha value. This function should find the closest flow
 	# combination that best matches the alpha value.
-	def coverHostWithVm(self, host):
+	def coverHostWithVm(self, host, forced=False):
 		vm = VM()
 		self.hostToVms.setdefault(host, [])
 		amount = 0
@@ -240,7 +246,7 @@ class Solver(object):
 			amount += f.getAmount()
 			flows.append(f)
 
-		if amount >= self.alpha:
+		if amount >= self.alpha or forced:
 			for f in flows:
 				vm.addFlow(f)
 			self.hostToVms[host].append(vm)
@@ -248,8 +254,70 @@ class Solver(object):
 		else:
 			return False
 
+	def findBestHostToCoverSwitch(self, switch):
+		'''
+			Greedily finds the path with maximum aggregate flow to the bottom (hosts).
+			NOTE: we assume there is NO LOOP in a flow's path (hops)
+			@return a host
+		'''
+		# assume there is no loop in a flow's path (hops)
+		# FIXME: [0.6, 0.6] will be in a vnf
+		# NOTE: we should "get" the "host" to deploy the VNF, and cover the flow
+		# in the top level function (get the "host" recursively, deploy once)
+		# Use first-fit algorithm to deploy (deploy on VNF at a time)
+		maxFlowAmount = 0
+		maxFlows = []
+		maxFlowNode = None
+		for child in switch.getChildren():
+			flows = [f for f in self.switchToFlows[switch] if child in f.hops]
+			# for f in self.switchToFlows[switch]:
+			# 	print f.hops
+			# print 'child: ', child, flows
+			amount = sum(f.getAmount() for f in flows)
+			if amount > maxFlowAmount:
+				maxFlowAmount = amount
+				maxFlows = flows
+				maxFlowNode = child
+
+		# print maxFlowAmount, maxFlows, maxFlowNode
+
+		if isinstance(maxFlowNode, Host):
+			return maxFlowNode
+		else:
+			return self.findBestHostToCoverSwitch(maxFlowNode)
+
 	def coverSwitchWithVm(self, switch):
+		'''
+			Cover a maximum set of flow on `switch` by deploying a VM on the target
+			host found by `findBestHostToCoverSwitch`.
+		'''
+		# Note: this function must be called before the flows are added to a VM
+		host = self.findBestHostToCoverSwitch(switch)
+		assert host is not None
+
+		flows = self.findMaximumFlowSetOnSwitch(switch)
 		vm = VM()
+		for f in flows:
+			vm.addFlow(f)
+
+		self.hostToVms.setdefault(host, [])
+		self.hostToVms[host].append(vm)
+
+	def findMaximumFlowSetOnSwitch(self, switch):
+		amount = 0
+		flows = []
+		for f in sorted(self.switchToFlows[switch], reverse=True):
+			if amount + f.getAmount() > 1:
+				break
+			if f.getAmount() > 0:
+				amount += f.getAmount()
+				flows.append(f)
+		return flows
+
+
+	def coverSwitchWithVmOld(self, switch):
+		vm = VM()
+
 		maxAmount = -1
 		maxFlow = None
 		for f in self.switchToFlows[switch]:
@@ -280,7 +348,14 @@ class Solver(object):
 			ret += '\n\t'
 			ret += '%r\n' % self.hostToVms[h]
 			numVms += len(self.hostToVms[h])
-		return ret + '\nNumber of VMs: %d' % (numVms)
+
+		totalFlowAmount = 0
+		for vms in self.hostToVms.values():
+			for vm in vms:
+				totalFlowAmount += sum(f.amount for f in vm.getFlows())
+
+		ret += '\nNumber of VMs: %d' % (numVms)
+		return ret + '\nTotal Amount of Flows: %f' % (totalFlowAmount)
 
 
 if __name__ == '__main__':
