@@ -282,7 +282,7 @@ class Solver(object):
 		self.hostToVms = {}
 		self.switchToFlows = {}
 
-	def solve(self, tree):
+	def solve(self, tree, noPrint=None):
 		assert isinstance(tree, Tree)
 		self.reset()
 
@@ -301,8 +301,11 @@ class Solver(object):
 					self.pushResidualFlowsToParent(s)
 
 		if self.getSwitchTotalFlowAmount(tree.root) > 0:
-			print 'root: ',
 			self.coverSwitchWithVm(tree.root)
+
+		if not noPrint:
+			print 'Number of VMs: %d' % (self.getNumVms()) + \
+				'\nTotal Amount of Flows: %f' % (self.getTotalFlowAmount())
 
 	def getSwitchTotalFlowAmount(self, switch):
 		self.switchToFlows.setdefault(switch, [])
@@ -329,12 +332,11 @@ class Solver(object):
 					self.switchToFlows[parent].append(f)
 					f.hops.append(parent)
 
-
-	# TODO: improve this function to provide optimal solution
-	# Flows can add up in many combinations, and one of them is closest
-	# to the alpha value. This function should find the closest flow
-	# combination that best matches the alpha value.
 	def coverHostWithVm(self, host, forced=False):
+		'''
+			Covers a host with a VM using first-fit algorithm.
+			If `forced=True`, a VM will be deployed under any circumstance.
+		'''
 		vm = VM()
 		self.hostToVms.setdefault(host, [])
 		amount = 0
@@ -441,23 +443,31 @@ class Solver(object):
 
 	def getSolution(self):
 		ret = ''
-		numVms = 0
 		for h in self.hostToVms.keys():
 			ret += 'host-%d' % h.id
 			ret += '\n\t'
 			ret += '%r\n' % self.hostToVms[h]
-			numVms += len(self.hostToVms[h])
 
+		ret += '\nNumber of VMs: %d' % (self.getNumVms())
+		return ret + '\nTotal Amount of Flows: %f' % (self.getTotalFlowAmount())
+
+	def getNumVms(self):
+		numVms = 0
+		for h in self.hostToVms.keys():
+			numVms += len(self.hostToVms[h])
+		return numVms
+
+	def getTotalFlowAmount(self):
 		totalFlowAmount = 0
 		for vms in self.hostToVms.values():
 			for vm in vms:
 				totalFlowAmount += sum(f.amount for f in vm.getFlows())
-
-		ret += '\nNumber of VMs: %d' % (numVms)
-		return ret + '\nTotal Amount of Flows: %f' % (totalFlowAmount)
+		return totalFlowAmount
 
 
 if __name__ == '__main__':
+	s = Solver(alpha=0.8)
+
 	# 2^3 = 8 hosts
 	t = Tree(depth=3, fanout=2)
 	hosts = t.getHosts()
@@ -494,15 +504,6 @@ if __name__ == '__main__':
 	hosts[7].addFlow(0.2)
 
 	t.draw('topo.png', showFlowCapacity=True)
-
-	print '*** Tree before solving:\n', t
-
-	s = Solver(alpha=0.8)
 	s.solve(t)
 
-	# t.draw('topo_solved.png', showFlowCapacity=True, showFlowAmount=True, showFlowVm=True)
 	t.draw('topo_solved.png', showFlowCapacity=True, showFlowVm=True)
-
-	print '*** Tree after solving:\n', t
-
-	print '*** VMs under each host:\n', s.getSolution()
