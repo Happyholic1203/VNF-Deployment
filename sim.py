@@ -1,5 +1,12 @@
+import pydot
+import Queue
+
 class Node(object):
 	__id = 0
+	dotSettings = {
+		'style': 'filled',
+		'fillcolor': 'white'
+	}
 	def __init__(self, **attrs):
 		self.attrs = attrs
 		self.parent = None
@@ -29,6 +36,9 @@ class Node(object):
 	def isHost(self):
 		return self.attrs.get('isHost', False)
 
+	def toDotNode(self):
+		raise NotImplementedError
+
 	def getReprStr(self, level=None):
 		level = 0 if level == None else level
 		tab = ''
@@ -36,7 +46,7 @@ class Node(object):
 			tab += '\t'
 
 		ret = tab
-		ret += self.getName()
+		ret += self.getFullName()
 		ret += '\n'
 		for child in self.children:
 			ret += child.getReprStr(level+1)
@@ -46,14 +56,24 @@ class Switch(Node):
 	def __init__(self, **attrs):
 		super(Switch, self).__init__(isSwitch=True, **attrs)
 
+	def getFullName(self):
+		return self.getName()
+
 	def getName(self):
 		return 's%d' % self.id
 
 	def __repr__(self):
 		return self.getName()
 
+	def toDotNode(self):
+		return pydot.Node(self.getName(), **self.dotSettings)
+
 class VM(object):
 	__id = 0
+	dotSettings = {
+		'style': 'filled',
+		'fillcolor': 'green'
+	}
 	def __init__(self):
 		self.flows = []
 		self.id = VM.__id
@@ -67,14 +87,30 @@ class VM(object):
 	def getFlows(self):
 		return self.flows
 
-	def getName(self):
-		return 'v%d' % self.id
+	def getTotalFlowCapacity(self):
+		return sum(f.amount for f in self.flows)
+
+	def getFullName(self):
+		return self.getName()
+
+	def getName(self, capacity=None):
+		ret = 'v%d' % self.id
+		if capacity:
+			ret += '\n(%.2f)' % (self.getTotalFlowCapacity())
+		return ret
 
 	def __repr__(self):
 		return '%s (%r)' % (self.getName(), self.flows)
 
+	def toDotNode(self):
+		return pydot.Node(self.getName(capacity=True), **self.dotSettings)
+
 class Flow(object):
 	__id = 0
+	dotSettings = {
+		'style': 'filled',
+		'fillcolor': 'blue'
+	}
 	def __init__(self, amount, host):
 		self.amount = amount
 		self.vm = None
@@ -83,7 +119,19 @@ class Flow(object):
 		self.id = Flow.__id
 		Flow.__id += 1
 
-	def getName(self):
+	def getName(self, amount=None, capacity=None, vm=None):
+		ret = 'f%d' % (self.id)
+		if amount and capacity:
+			ret += ' (%.2f/%.2f)' % (self.getAmount(), self.amount)
+		elif amount:
+			ret += ' (%.2f)' % (self.getAmount())
+		elif capacity:
+			ret += ' (%.2f)' % (self.amount)
+		if vm:
+			ret += '\n(%s)' % (self.vm.getName())
+		return ret
+
+	def getFullName(self):
 		# return 'flow-%d (%.2f)' % (self.id, self.getAmount())
 		return 'f%d (%.2f/%.2f)' % (self.id, self.getAmount(), self.amount)
 
@@ -107,9 +155,18 @@ class Flow(object):
 		return self.amount < other.amount
 
 	def __repr__(self):
-		return self.getName()
+		return self.getFullName()
+
+	def toDotNode(self, amount=None, capacity=None, vm=None):
+		return pydot.Node(
+			self.getName(capacity=capacity, amount=amount, vm=vm),
+			**self.dotSettings)
 
 class Host(Node):
+	dotSettings = {
+		'style': 'filled',
+		'fillcolor': 'red'
+	}
 	def __init__(self, **attrs):
 		super(Host, self).__init__(isHost=True, **attrs)
 		self.flows = []
@@ -130,10 +187,16 @@ class Host(Node):
 		return self.flows
 
 	def getName(self):
+		return 'h%d' % (self.id)
+
+	def getFullName(self):
 		return 'h%d %r' % (self.id, self.flows)
 
 	def __repr__(self):
-		return self.getName()
+		return self.getFullName()
+
+	def toDotNode(self):
+		return pydot.Node(self.getName(), **self.dotSettings)
 
 class Tree(object):
 	def __init__(self, depth=None, fanout=None):
@@ -144,7 +207,11 @@ class Tree(object):
 			self.root = Switch(height=0)
 			self.nodes = [self.root]
 			self.depth = depth
+
+			# build the switches
 			self.buildTree(self.root, depth-1, fanout)
+
+			# build the hosts
 			for node in self.getNodesAtHeight(self.depth-1):
 				for _ in range(fanout):
 					h = Host(height=self.depth)
@@ -173,6 +240,41 @@ class Tree(object):
 
 	def __repr__(self):
 		return self.root.getReprStr(0)
+
+	def draw(self, filename, flowAmount=None, flowCapacity=None, flowVm=None):
+		'''
+			Assuming there is no loop in the tree.
+		'''
+		g = pydot.Dot(graph_type='graph')
+
+		# BFS
+		queue = Queue.Queue()
+		queue.put(self.root)
+		while not queue.empty():
+			parent = queue.get()
+			parentNode = parent.toDotNode()
+			g.add_node(parentNode)
+			children = parent.getChildren()
+			for child in children:
+				queue.put(child)
+				childNode = child.toDotNode()
+				g.add_node(childNode)
+				g.add_edge(pydot.Edge(parentNode, childNode))
+				if isinstance(child, Host):
+					for flow in child.getFlows():
+						flowNode = flow.toDotNode(
+							amount=flowAmount,
+							capacity=flowCapacity,
+							vm=flowVm)
+						g.add_node(flowNode)
+						g.add_edge(pydot.Edge(childNode, flowNode))
+
+						if flowVm:
+							vmNode = flow.getVM().toDotNode()
+							g.add_node(vmNode)
+							g.add_edge(pydot.Edge(flowNode, vmNode))
+
+		g.write_png(filename)
 
 class Solver(object):
 	def __init__(self, alpha=0.8):
@@ -394,10 +496,15 @@ if __name__ == '__main__':
 	hosts[7].addFlow(0.3)
 	hosts[7].addFlow(0.2)
 
+	t.draw('topo.png', flowCapacity=True)
+
 	print '*** Tree before solving:\n', t
 
 	s = Solver(alpha=0.8)
 	s.solve(t)
+
+	# t.draw('topo_solved.png', flowCapacity=True, flowAmount=True, flowVm=True)
+	t.draw('topo_solved.png', flowCapacity=True, flowVm=True)
 
 	print '*** Tree after solving:\n', t
 
