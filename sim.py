@@ -87,7 +87,7 @@ class VM(object):
 	def getFlows(self):
 		return self.flows
 
-	def getTotalFlowCapacity(self):
+	def getTotalshowFlowCapacity(self):
 		return sum(f.amount for f in self.flows)
 
 	def getFullName(self):
@@ -96,7 +96,7 @@ class VM(object):
 	def getName(self, capacity=None):
 		ret = 'v%d' % self.id
 		if capacity:
-			ret += '\n(%.2f)' % (self.getTotalFlowCapacity())
+			ret += '\n(%.2f)' % (self.getTotalshowFlowCapacity())
 		return ret
 
 	def __repr__(self):
@@ -109,7 +109,8 @@ class Flow(object):
 	__id = 0
 	dotSettings = {
 		'style': 'filled',
-		'fillcolor': 'blue'
+		'fillcolor': 'blue',
+		'shape': 'rectangle'
 	}
 	def __init__(self, amount, host):
 		self.amount = amount
@@ -119,20 +120,17 @@ class Flow(object):
 		self.id = Flow.__id
 		Flow.__id += 1
 
-	def getName(self, amount=None, capacity=None, vm=None):
+	def getName(self, amount=None, capacity=None):
 		ret = 'f%d' % (self.id)
 		if amount and capacity:
-			ret += ' (%.2f/%.2f)' % (self.getAmount(), self.amount)
+			ret += '\n(%.2f/%.2f)' % (self.getAmount(), self.amount)
 		elif amount:
-			ret += ' (%.2f)' % (self.getAmount())
+			ret += '\n(%.2f)' % (self.getAmount())
 		elif capacity:
-			ret += ' (%.2f)' % (self.amount)
-		if vm:
-			ret += '\n(%s)' % (self.vm.getName())
+			ret += '\n(%.2f)' % (self.amount)
 		return ret
 
 	def getFullName(self):
-		# return 'flow-%d (%.2f)' % (self.id, self.getAmount())
 		return 'f%d (%.2f/%.2f)' % (self.id, self.getAmount(), self.amount)
 
 	def setVM(self, vm):
@@ -157,9 +155,9 @@ class Flow(object):
 	def __repr__(self):
 		return self.getFullName()
 
-	def toDotNode(self, amount=None, capacity=None, vm=None):
+	def toDotNode(self, amount=None, capacity=None):
 		return pydot.Node(
-			self.getName(capacity=capacity, amount=amount, vm=vm),
+			self.getName(capacity=capacity, amount=amount),
 			**self.dotSettings)
 
 class Host(Node):
@@ -241,7 +239,7 @@ class Tree(object):
 	def __repr__(self):
 		return self.root.getReprStr(0)
 
-	def draw(self, filename, flowAmount=None, flowCapacity=None, flowVm=None):
+	def draw(self, filename, showFlowAmount=None, showFlowCapacity=None, showFlowVm=None):
 		'''
 			Assuming there is no loop in the tree.
 		'''
@@ -263,13 +261,12 @@ class Tree(object):
 				if isinstance(child, Host):
 					for flow in child.getFlows():
 						flowNode = flow.toDotNode(
-							amount=flowAmount,
-							capacity=flowCapacity,
-							vm=flowVm)
+							amount=showFlowAmount,
+							capacity=showFlowCapacity)
 						g.add_node(flowNode)
 						g.add_edge(pydot.Edge(childNode, flowNode))
 
-						if flowVm:
+						if showFlowVm:
 							vmNode = flow.getVM().toDotNode()
 							g.add_node(vmNode)
 							g.add_edge(pydot.Edge(flowNode, vmNode))
@@ -496,15 +493,15 @@ if __name__ == '__main__':
 	hosts[7].addFlow(0.3)
 	hosts[7].addFlow(0.2)
 
-	t.draw('topo.png', flowCapacity=True)
+	t.draw('topo.png', showFlowCapacity=True)
 
 	print '*** Tree before solving:\n', t
 
 	s = Solver(alpha=0.8)
 	s.solve(t)
 
-	# t.draw('topo_solved.png', flowCapacity=True, flowAmount=True, flowVm=True)
-	t.draw('topo_solved.png', flowCapacity=True, flowVm=True)
+	# t.draw('topo_solved.png', showFlowCapacity=True, showFlowAmount=True, showFlowVm=True)
+	t.draw('topo_solved.png', showFlowCapacity=True, showFlowVm=True)
 
 	print '*** Tree after solving:\n', t
 
