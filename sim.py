@@ -1,8 +1,10 @@
+#!/usr/bin/env python
+
 import pydot
 import Queue
 import random
 
-class Node(object):
+class TreeNode(object):
 	__id = 0
 	dotSettings = {
 		'style': 'filled',
@@ -12,8 +14,8 @@ class Node(object):
 		self.attrs = attrs
 		self.parent = None
 		self.children = []
-		self.id = Node.__id
-		Node.__id += 1
+		self.id = TreeNode.__id
+		TreeNode.__id += 1
 
 	def setParent(self, parent):
 		self.parent = parent
@@ -59,7 +61,7 @@ class Node(object):
 			ret += child.getReprStr(level+1)
 		return ret
 
-class Switch(Node):
+class Switch(TreeNode):
 	def __init__(self, **attrs):
 		super(Switch, self).__init__(isSwitch=True, **attrs)
 
@@ -190,7 +192,7 @@ class Flow(object):
 			self.getName(capacity=capacity, amount=amount),
 			**self.dotSettings)
 
-class Host(Node):
+class Host(TreeNode):
 	dotSettings = {
 		'style': 'filled',
 		'fillcolor': 'red'
@@ -313,7 +315,7 @@ class Tree(object):
 			Assuming there is no loop in the tree.
 		'''
 		g = pydot.Dot(graph_type='graph')
-		# g.add_node(pydot.Node(str('alpha = %.2f' % alpha), shape='rectangle'))
+		# g.add_node(pydot.TreeNode(str('alpha = %.2f' % alpha), shape='rectangle'))
 
 		# BFS
 		queue = Queue.Queue()
@@ -363,8 +365,8 @@ class Solver(object):
 		'''
 			Returns the distance between two nodes (an integer).
 		'''
-		assert isinstance(node1, Node), '%r is not a node' % node1
-		assert isinstance(node2, Node), '%r is not a node' % node2
+		assert isinstance(node1, TreeNode), '%r is not a node' % node1
+		assert isinstance(node2, TreeNode), '%r is not a node' % node2
 		discovered = {}
 		queue = Queue.Queue()
 		queue.put((node1, 0))
@@ -682,9 +684,11 @@ class TestCase(object):
 		raise Exception('The ratio in flowSettings do not add up to 1.0')
 
 	# TODO
-	def run(self, solvers, drawPng=None, printVmPlacement=True, printSummary=True):
+	def run(self, solvers, drawPng=None, pngOutputDir=None, printVmPlacement=True, printSummary=True):
 		for s in solvers:
 			assert isinstance(s, Solver)
+		if not pngOutputDir:
+			pngOutputDir = '.'
 
 		allFlows = self.tree.getFlows()
 		numFlows = len(allFlows)
@@ -727,7 +731,7 @@ class TestCase(object):
 			solver.solve(self.tree)
 			if drawPng:
 				self.tree.draw(
-					'%s.png' % self.name,
+					'%s/%s.png (%s)' % (pngOutputDir, self.name, solver.getName()),
 					showFlowCapacity=True,
 					showFlowVm=True)
 			records.append({
@@ -769,11 +773,11 @@ if __name__ == '__main__':
 	leastVnfSolver = LeastVnfSolver()
 
 	numFlowsPerHostSettings = [
-		(1, 5),
-		(5, 10),
-		(10, 50),
-		(100, 500),
-		(1000, 5000)
+		(1, 5)
+		# (5, 10),
+		# (10, 50),
+		# (100, 500),
+		# (1000, 5000)
 		# (10000, 50000)
 	]
 
@@ -850,6 +854,8 @@ if __name__ == '__main__':
 					maxNumFlowsPerHost=maxNumFlowsPerHost,
 					flowSettings=param['flowSettings']
 				).run([proposedSolver, leastCostSolver, leastVnfSolver],
-					printVmPlacement=False))
+					printVmPlacement=False,
+					pngOutputDir='png',
+					drawPng=False))
 
 	print results
