@@ -200,6 +200,11 @@ class Host(Node):
 		self.flows = []
 		self.vms = []
 
+	def reset(self):
+		for f in self.getFlows():
+			f.reset()
+		self.vms = []
+
 	def addFlow(self, amount):
 		self.flows.append(Flow(amount, self))
 
@@ -260,14 +265,14 @@ class Tree(object):
 					h.setParent(node)
 
 	def reset(self):
-		pass
 		# Flow.resetId()
 		# VM.resetId()
 		for h in [n for n in self.nodes if isinstance(n, Host)]:
-			for f in h.getFlows():
-				f.reset()
-			for vm in h.getVms():
-				vm.reset()
+			h.reset()
+			# for f in h.getFlows():
+			# 	f.reset()
+			# for vm in h.getVms():
+			# 	vm.reset()
 
 	def buildTree(self, node, depth, fanout):
 		if depth == 0:
@@ -288,15 +293,27 @@ class Tree(object):
 	def getSwitches(self):
 		return [n for n in self.nodes if n.isSwitch()]
 
+	def getFlows(self):
+		flows = []
+		for h in self.getHosts():
+			map(flows.append, h.getFlows())
+		return flows
+
 	def __repr__(self):
 		return self.root.getReprStr(0)
 
-	def draw(self, filename, alpha, showFlowAmount=None, showFlowCapacity=None, showFlowVm=None):
+	def getTotalFlowAmount(self):
+		amount = 0
+		for h in self.getHosts():
+			amount += sum(f.amount for f in h.getFlows())
+		return amount
+
+	def draw(self, filename, showFlowAmount=None, showFlowCapacity=None, showFlowVm=None):
 		'''
 			Assuming there is no loop in the tree.
 		'''
 		g = pydot.Dot(graph_type='graph')
-		g.add_node(pydot.Node(str('alpha = %.2f' % alpha), shape='rectangle'))
+		# g.add_node(pydot.Node(str('alpha = %.2f' % alpha), shape='rectangle'))
 
 		# BFS
 		queue = Queue.Queue()
@@ -311,6 +328,7 @@ class Tree(object):
 				childNode = child.toDotNode()
 				g.add_node(childNode)
 				g.add_edge(pydot.Edge(parentNode, childNode))
+				# TODO: refactor into a function
 				if isinstance(child, Host):
 					for flow in child.getFlows():
 						flowNode = flow.toDotNode(
@@ -330,8 +348,7 @@ class Tree(object):
 		g.write_png(filename)
 
 class Solver(object):
-	def __init__(self, alpha=0.8):
-		self.alpha = alpha
+	def __init__(self):
 		self.reset()
 
 	def reset(self):
@@ -339,25 +356,7 @@ class Solver(object):
 		self.switchToFlows = {}
 
 	def solve(self, tree):
-		assert isinstance(tree, Tree)
-		self.reset()
-
-		for h in tree.getHosts():
-			while h.getTotalFlowAmount() >= self.alpha and self.coverHostWithVm(h):
-				pass
-			self.pushResidualFlowsToParent(h)
-
-		# bottom up
-		for height in reversed(range(tree.depth)):
-			for s in tree.getNodesAtHeight(height):
-				while self.getSwitchTotalFlowAmount(s) >= self.alpha:
-					# print self.getSwitchTotalFlowAmount(s)
-					self.coverSwitchWithVm(s)
-				if not s.isRoot():
-					self.pushResidualFlowsToParent(s)
-
-		if self.getSwitchTotalFlowAmount(tree.root) > 0:
-			self.coverSwitchWithVm(tree.root)
+		raise NotImplementedError
 
 	@classmethod
 	def dist(cls, node1, node2):
@@ -403,7 +402,6 @@ class Solver(object):
 			for f in node.getFlows():
 				if f.getAmount() > 0:
 					self.switchToFlows[parent].append(f)
-					# print 'pushing %s onto %s.hops' % (parent, f)
 					f.hops.append(parent)
 		else:
 			for f in self.switchToFlows[node]:
@@ -412,30 +410,7 @@ class Solver(object):
 					f.hops.append(parent)
 
 	def coverHostWithVm(self, host, forced=False):
-		'''
-			Covers a host with a VM using first-fit algorithm.
-			If `forced=True`, a VM will be deployed under any circumstance.
-		'''
-		vm = VM()
-		self.hostToVms.setdefault(host, [])
-		amount = 0
-		flows = []
-		for f in sorted(host.getFlows(), reverse=True):
-			if f.getAmount() == 0:
-				continue
-			if amount + f.getAmount() > 1:
-				break
-			amount += f.getAmount()
-			flows.append(f)
-
-		if (amount >= self.alpha and amount <= 1) or forced:
-			for f in flows:
-				vm.addFlow(f)
-			self.hostToVms[host].append(vm)
-			host.addVm(vm)
-			return True
-		else:
-			return False
+		raise NotImplementedError
 
 	def findBestHostToCoverSwitch(self, switch):
 		'''
@@ -498,31 +473,16 @@ class Solver(object):
 				flows.append(f)
 		return flows
 
-
-	def coverSwitchWithVmOld(self, switch):
-		vm = VM()
-
-		maxAmount = -1
-		maxFlow = None
-		for f in self.switchToFlows[switch]:
-			if f.getAmount() > maxAmount:
-				maxFlow = f
-		amount = maxFlow.getAmount()
-
-		# make sure that the maxFlow is covered by the VM
-		vm.addFlow(maxFlow)
-		host = maxFlow.getHost()
-		self.hostToVms.setdefault(host, [])
-
-		for f in self.switchToFlows[switch]:
-			if f == maxFlow:
-				continue
+	def findMaximumFlowSetOnFlows(self, flows):
+		amount = 0
+		maxFlowSet = []
+		for f in sorted(flows, reverse=True):
 			if amount + f.getAmount() > 1:
-				break
-			amount += f.getAmount()
-			vm.addFlow(f)
-
-		self.hostToVms[host].append(vm)
+				continue
+			if f.getAmount() > 0:
+				amount += f.getAmount()
+				maxFlowSet.append(f)
+		return maxFlowSet
 
 	def getSolution(self, showVmPlacement=True, showSummary=True):
 		ret = ''
@@ -548,10 +508,8 @@ class Solver(object):
 					totalCost += f.amount * self.dist(f.getHost(), f.getVm().getHost())
 		return totalCost
 
-
 	def getSummary(self):
-		ret = 'Alpha: %.2f' % (self.alpha)
-		ret += '\nNumber of VMs: %d' % (self.getNumVms())
+		ret = 'Number of VMs: %d' % (self.getNumVms())
 		ret += '\nTotal Traffic Cost: %.2f' % (self.getTotalCost())
 		return ret + '\nTotal Amount of Flows: %.2f' % (self.getTotalFlowAmount())
 
@@ -562,22 +520,127 @@ class Solver(object):
 		return numVms
 
 	def getTotalFlowAmount(self):
+		'''
+			Returns the aggregate flow amount on all flows.
+		'''
 		totalFlowAmount = 0
 		for vms in self.hostToVms.values():
 			for vm in vms:
 				totalFlowAmount += sum(f.amount for f in vm.getFlows())
 		return totalFlowAmount
 
+class AlphaSolver(Solver):
+	def __init__(self, alpha=0.8):
+		super(AlphaSolver, self).__init__()
+		self.alpha = alpha
+
+	def solve(self, tree):
+		assert isinstance(tree, Tree)
+		self.reset()
+
+		for h in tree.getHosts():
+			while h.getTotalFlowAmount() >= self.alpha and self.coverHostWithVm(h):
+				pass
+			self.pushResidualFlowsToParent(h)
+
+		# bottom up
+		for height in reversed(range(tree.depth)):
+			for s in tree.getNodesAtHeight(height):
+				while self.getSwitchTotalFlowAmount(s) >= self.alpha:
+					# print self.getSwitchTotalFlowAmount(s)
+					self.coverSwitchWithVm(s)
+				if not s.isRoot():
+					self.pushResidualFlowsToParent(s)
+
+		if self.getSwitchTotalFlowAmount(tree.root) > 0:
+			self.coverSwitchWithVm(tree.root)
+
+	def coverHostWithVm(self, host, forced=False):
+		'''
+			Covers a host with a VM using first-fit algorithm.
+			If `forced=True`, a VM will be deployed under any circumstance.
+		'''
+		vm = VM()
+		self.hostToVms.setdefault(host, [])
+		amount = 0
+		flows = []
+		for f in sorted(host.getFlows(), reverse=True):
+			if f.getAmount() == 0:
+				continue
+			if amount + f.getAmount() > 1:
+				break
+			amount += f.getAmount()
+			flows.append(f)
+
+		if (amount >= self.alpha and amount <= 1) or forced:
+			for f in flows:
+				vm.addFlow(f)
+			self.hostToVms[host].append(vm)
+			host.addVm(vm)
+			return True
+		else:
+			return False
+
+	def getSummary(self):
+		ret = 'Alpha: %.2f\n' % (self.alpha)
+		return ret + super(AlphaSolver, self).getSummary()
+
+	def getName(self):
+		return 'Alphasolver (%.2f)' % self.alpha
+
+class LeastVnfSolver(Solver):
+	def __init__(self):
+		super(LeastVnfSolver, self).__init__()
+
+	def solve(self, tree):
+		assert isinstance(tree, Tree)
+		discoveredNodes = []
+		queue = Queue.Queue()
+		map(queue.put, tree.getHosts())
+		while not queue.empty():
+			node = queue.get()
+			if node.isRoot():
+				break
+			self.pushResidualFlowsToParent(node)
+			if node.getParent() not in discoveredNodes:
+				queue.put(node.getParent())
+				discoveredNodes.append(node.getParent())
+
+		targetHost = self.findBestHostToCoverSwitch(tree.root)
+		self.hostToVms.setdefault(targetHost, [])
+		# first-fit
+		flows = []
+		for host in tree.getHosts():
+			flows.extend(host.getFlows())
+
+		# TODO: Improve the efficiency
+		# (findMaximumFlowSetOnFlows will iterate through all flows every time)
+		# O(n^2) -> O(n)
+		while True:
+			maxFlowSet = self.findMaximumFlowSetOnFlows(flows)
+			map(flows.remove, maxFlowSet)
+			if len(maxFlowSet) == 0:
+				break
+			vm = VM()
+			map(vm.addFlow, maxFlowSet)
+			self.hostToVms[targetHost].append(vm)
+			targetHost.addVm(vm)
+
+	def getName(self):
+		return 'LeastVnfSolver'
+
+
 class TestCase(object):
-	def __init__(self, name, solver, flowSettings=None,
+	def __init__(self, name, flowSettings=None,
 		depth=3, fanout=2, minFlowAmount=0, maxFlowAmount=1,
 		minNumFlowsPerHost=2, maxNumFlowsPerHost=5):
 		if not self.checkFlowSettings(flowSettings):
 			raise Exception('Invalid flow settings: %r' % (flowSettings))
 
 		self.name = name
-		self.solver = solver
 		self.flowSettings = flowSettings
+		self.minNumFlowsPerHost = minNumFlowsPerHost
+		self.maxNumFlowsPerHost = maxNumFlowsPerHost
 		self.depth = depth
 		self.fanout = fanout
 
@@ -586,20 +649,13 @@ class TestCase(object):
 				{
 					'minFlowAmount': minFlowAmount,
 					'maxFlowAmount': maxFlowAmount,
-					'minNumFlowsPerHost': minNumFlowsPerHost,
-					'maxNumFlowsPerHost': maxNumFlowsPerHost,
 					'ratio': 1
 				}
 			]
 
 		self.tree = self.buildTree(self.depth, self.fanout)
 
-	def setSolver(self, solver):
-		self.solver = solver
-		return self
-
 	def reset(self):
-		self.solver.reset()
 		self.tree.reset()
 		return self
 
@@ -612,15 +668,9 @@ class TestCase(object):
 		return tree
 
 	def getNumFlowsPerHost(self):
-		uniform = random.uniform(0, 1.0)
-		accumulatedProb = 0
-		for flowSetting in self.flowSettings:
-			accumulatedProb += flowSetting['ratio']
-			if accumulatedProb >= uniform:
-				return random.randint(
-					flowSetting['minNumFlowsPerHost'],
-					flowSetting['maxNumFlowsPerHost'])
-		raise Exception('The ratio in flowSettings do not add up to 1.0')
+		return random.randint(
+			self.minNumFlowsPerHost,
+			self.maxNumFlowsPerHost)
 
 	def getFlowAmount(self):
 		uniform = random.uniform(0, 1.0)
@@ -632,20 +682,80 @@ class TestCase(object):
 		raise Exception('The ratio in flowSettings do not add up to 1.0')
 
 	# TODO
-	def run(self, drawPng=None, printVmPlacement=True, printSummary=True):
-		self.solver.solve(self.tree)
-		if drawPng:
-			self.tree.draw(
-				'%s.png' % self.name,
-				self.solver.alpha,
-				showFlowCapacity=True,
-				showFlowVm=True)
-		print '------- Begin %s -------' % self.name
-		print self.solver.getSolution(
-			showVmPlacement=printVmPlacement,
-			showSummary=printSummary)
-		print '------- End %s -------\n' % self.name
-		return self
+	def run(self, solvers, drawPng=None, printVmPlacement=True, printSummary=True):
+		for s in solvers:
+			assert isinstance(s, Solver)
+
+		allFlows = self.tree.getFlows()
+		numFlows = len(allFlows)
+		numHosts = len(self.tree.getHosts())
+		flowAmounts = [f.amount for f in allFlows]
+		flowsPerHostList = [len(flows) for flows in [h.getFlows() for h in self.tree.getHosts()]]
+		totalFlowAmount = self.tree.getTotalFlowAmount()
+		print '** TestCase: %s' % self.name
+		print '** Number of Hosts: %d' % numHosts
+		print '** Number of Flows per Host: (min, max, avg) = (%d, %d, %.2f)' % (
+			min(flowsPerHostList),
+			max(flowsPerHostList),
+			(float(numFlows) / float(numHosts)))
+		print '** Total Number of Flows: %d' % numFlows
+		print '** Flow Amount: (min, max, avg) = (%.2f, %.2f, %.2f)' % (
+			min(flowAmounts),
+			max(flowAmounts),
+			(totalFlowAmount / float(numFlows)))
+		print '** Total Flow Amount: %.2f' % totalFlowAmount
+
+		result = {
+			'name': self.name,
+			'numHosts': numHosts,
+			'flowsPerHost': {
+				'min': min(flowsPerHostList),
+				'max': max(flowsPerHostList),
+				'avg': (float(numFlows) / float(numHosts))
+			},
+			'totalNumFlows': numFlows,
+			'flowAmount': {
+				'min': min(flowAmounts),
+				'max': max(flowAmounts),
+				'avg': (totalFlowAmount / float(numFlows))
+			},
+			'totalFlowAmount': totalFlowAmount
+		}
+
+		records = []
+		for solver in solvers:
+			solver.solve(self.tree)
+			if drawPng:
+				self.tree.draw(
+					'%s.png' % self.name,
+					showFlowCapacity=True,
+					showFlowVm=True)
+			records.append({
+				'solver': solver.getName(),
+				'numVms': solver.getNumVms(),
+				'cost': solver.getTotalCost()
+			})
+			# print solver.getSolution(
+			# 	showVmPlacement=printVmPlacement,
+			# 	showSummary=printSummary)
+			self.reset()
+			solver.reset()
+
+		result['records'] = records
+		self.printRecords(records)
+		return result
+
+	@staticmethod
+	def printRecords(records):
+		fmt = '{:>20}{:>10}{:>10}'
+		print fmt.format('solver', 'numVms', 'cost')
+		print '---------------------------------------------'
+		for rec in records:
+			print fmt.format(
+				rec['solver'],
+				rec['numVms'],
+				'%.2f' % rec['cost'])
+		print ''
 
 	# TODO
 	def checkFlowSettings(self, flowSettings):
@@ -654,42 +764,92 @@ class TestCase(object):
 		return True
 
 if __name__ == '__main__':
-	proposedSolver = Solver(alpha=0.8)
-	leastCostSolver = Solver(alpha=0.0001)
-	TestCase('small', proposedSolver, fanout=2).run(printVmPlacement=False)\
-		.reset().setSolver(leastCostSolver).run(printVmPlacement=False)
-	# TestCase('1', proposedSolver, fanout=3).run(printVmPlacement=False)
-	# TestCase('2', proposedSolver, fanout=3, maxNumFlowsPerHost=10).run()
-	# TestCase('3', proposedSolver, fanout=3, maxFlowAmount=0.1).run()
-	# TestCase('4', proposedSolver, fanout=2, flowSettings=[
-	# 	{
-	# 		'minFlowAmount': 0,
-	# 		'maxFlowAmount': 0.1,
-	# 		'minNumFlowsPerHost': 3,
-	# 		'maxNumFlowsPerHost': 6,
-	# 		'ratio': 0.5
-	# 	},
-	# 	{
-	# 		'minFlowAmount': 0.7,
-	# 		'maxFlowAmount': 1,
-	# 		'minNumFlowsPerHost': 2,
-	# 		'maxNumFlowsPerHost': 3,
-	# 		'ratio': 0.5
-	# 	}
-	# ]).run()
-	# TestCase('5', proposedSolver, fanout=3, flowSettings=[
-	# 	{
-	# 		'minFlowAmount': 0,
-	# 		'maxFlowAmount': 0.1,
-	# 		'minNumFlowsPerHost': 3,
-	# 		'maxNumFlowsPerHost': 6,
-	# 		'ratio': 0.7
-	# 	},
-	# 	{
-	# 		'minFlowAmount': 0.7,
-	# 		'maxFlowAmount': 1,
-	# 		'minNumFlowsPerHost': 2,
-	# 		'maxNumFlowsPerHost': 3,
-	# 		'ratio': 0.3
-	# 	}
-	# ]).run()
+	proposedSolver = AlphaSolver(alpha=0.8)
+	leastCostSolver = AlphaSolver(alpha=0.0001)
+	leastVnfSolver = LeastVnfSolver()
+
+	numFlowsPerHostSettings = [
+		(1, 5),
+		(5, 10),
+		(10, 50),
+		(100, 500),
+		(1000, 5000)
+		# (10000, 50000)
+	]
+
+	params = [
+		{
+			'name': 'Small Flows: [0:0.1]',
+			'numFlowsPerHostSettings': numFlowsPerHostSettings,
+			'flowSettings': [{
+				'minFlowAmount': 0,
+				'maxFlowAmount': 0.1,
+				'ratio': 1
+			}]
+		}, {
+			'name': 'Large Flows: [0.9:1]',
+			'numFlowsPerHostSettings': numFlowsPerHostSettings,
+			'flowSettings': [{
+				'minFlowAmount': 0.7,
+				'maxFlowAmount': 1,
+				'ratio': 1
+			}]
+		}, {
+			'name': 'Medium Flows: [0.45:0.55]',
+			'numFlowsPerHostSettings': numFlowsPerHostSettings,
+			'flowSettings': [{
+				'minFlowAmount': 0.45,
+				'maxFlowAmount': 0.55,
+				'ratio': 1
+			}]
+		}, {
+			'name': 'Small and Large Flows [0:0.1] : [0.9:1] = 1 : 1',
+			'numFlowsPerHostSettings': numFlowsPerHostSettings,
+			'flowSettings': [{
+					'minFlowAmount': 0,
+					'maxFlowAmount': 0.1,
+					'ratio': 0.5
+				}, {
+					'minFlowAmount': 0.9,
+					'maxFlowAmount': 1,
+					'ratio': 0.5
+				}
+			]
+		}, {
+			'name': 'Small and Medium Flows [0:0.1] : [0.45:0.55] = 1 : 1',
+			'numFlowsPerHostSettings': numFlowsPerHostSettings,
+			'flowSettings': [{
+					'minFlowAmount': 0,
+					'maxFlowAmount': 0.1,
+					'ratio': 0.5
+				}, {
+					'minFlowAmount': 0.45,
+					'maxFlowAmount': 0.55,
+					'ratio': 0.5
+				}
+			]
+		}, {
+			'name': 'Random Flows [0:1]',
+			'numFlowsPerHostSettings': numFlowsPerHostSettings,
+			'flowSettings': [{
+					'minFlowAmount': 0,
+					'maxFlowAmount': 1,
+					'ratio': 1
+				}
+			]
+		}
+	]
+
+	results = []
+
+	for param in params:
+		for minNumFlowsPerHost, maxNumFlowsPerHost in param['numFlowsPerHostSettings']:
+			results.append(TestCase(
+				param['name'],
+					minNumFlowsPerHost=minNumFlowsPerHost,
+					maxNumFlowsPerHost=maxNumFlowsPerHost,
+					flowSettings=param['flowSettings']
+				).run([proposedSolver, leastCostSolver, leastVnfSolver],
+					printVmPlacement=False))
+
+	print results
