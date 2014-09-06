@@ -1,5 +1,6 @@
 from ds import *
 import Queue
+import time
 
 class Solver(object):
 	def __init__(self):
@@ -22,10 +23,6 @@ class Solver(object):
 		discovered = {}
 		queue = Queue.Queue()
 		queue.put((node1, 0))
-		# discovered[node1] = True
-		# neighbors = node1.getNeighbors()
-		# map(queue.put, [(neighbor, 1) for neighbor in neighbors])
-		# discovered.update(dict([(neighbor, True) for neighbor in neighbors]))
 		while not queue.empty():
 			node, distance = queue.get()
 			if node == node2:
@@ -36,7 +33,6 @@ class Solver(object):
 				neighbors = node.getNeighbors()
 				map(queue.put, [(neighbor, distance + 1) for neighbor in neighbors])
 				discovered[node] = True
-				# discovered.update(dict([(neighbor, True) for neighbor in neighbors]))
 		raise Exception('Unable to find distance between %r and %r' % (node1, node2))
 
 	def getSwitchTotalFlowAmount(self, switch):
@@ -72,26 +68,18 @@ class Solver(object):
 			NOTE: we assume there is NO LOOP in a flow's path (hops)
 			@return a host
 		'''
-		# assume there is no loop in a flow's path (hops)
-		# FIXME: [0.6, 0.6] will be in a vnf
-		# NOTE: we should "get" the "host" to deploy the VNF, and cover the flow
-		# in the top level function (get the "host" recursively, deploy once)
-		# Use first-fit algorithm to deploy (deploy on VNF at a time)
 		maxFlowAmount = 0
 		maxFlows = []
 		maxFlowNode = None
 		for child in switch.getChildren():
 			flows = [f for f in self.switchToFlows[switch] if child in f.hops]
-			# for f in self.switchToFlows[switch]:
-			# 	print f.hops
-			# print 'child: ', child, flows
 			amount = sum(f.getAmount() for f in flows)
 			if amount > maxFlowAmount:
 				maxFlowAmount = amount
 				maxFlows = flows
 				maxFlowNode = child
 
-		# print maxFlowAmount, maxFlows, maxFlowNode
+		assert maxFlowNode is not None
 
 		if isinstance(maxFlowNode, Host):
 			return maxFlowNode
@@ -130,9 +118,14 @@ class Solver(object):
 	def findMaximumFlowSetOnFlows(self, flows):
 		amount = 0
 		maxFlowSet = []
-		for f in sorted(flows, reverse=True):
+		sortedFlows = sorted(flows, reverse=True)
+		for f in sortedFlows:
 			if amount + f.getAmount() > 1:
-				continue
+				# early stop for better efficiency
+				if amount + sortedFlows[-1].getAmount() > 1:
+					break
+				else:
+					continue
 			if f.getAmount() > 0:
 				amount += f.getAmount()
 				maxFlowSet.append(f)
@@ -159,7 +152,7 @@ class Solver(object):
 		for vms in self.hostToVms.values():
 			for vm in vms:
 				for f in vm.getFlows():
-					totalCost += f.amount * self.dist(f.getHost(), f.getVm().getHost())
+					totalCost += f.getCapacity() * self.dist(f.getHost(), f.getVm().getHost())
 		return totalCost
 
 	def getSummary(self):
@@ -180,7 +173,7 @@ class Solver(object):
 		totalFlowAmount = 0
 		for vms in self.hostToVms.values():
 			for vm in vms:
-				totalFlowAmount += sum(f.amount for f in vm.getFlows())
+				totalFlowAmount += sum(f.getCapacity() for f in vm.getFlows())
 		return totalFlowAmount
 
 class AlphaSolver(Solver):
@@ -201,7 +194,6 @@ class AlphaSolver(Solver):
 		for height in reversed(range(tree.depth)):
 			for s in tree.getNodesAtHeight(height):
 				while self.getSwitchTotalFlowAmount(s) >= self.alpha:
-					# print self.getSwitchTotalFlowAmount(s)
 					self.coverSwitchWithVm(s)
 				if not s.isRoot():
 					self.pushResidualFlowsToParent(s)
@@ -267,9 +259,6 @@ class LeastVnfSolver(Solver):
 		for host in tree.getHosts():
 			flows.extend(host.getFlows())
 
-		# TODO: Improve the efficiency
-		# (findMaximumFlowSetOnFlows will iterate through all flows every time)
-		# O(n^2) -> O(n)
 		while True:
 			maxFlowSet = self.findMaximumFlowSetOnFlows(flows)
 			map(flows.remove, maxFlowSet)

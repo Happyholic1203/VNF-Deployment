@@ -1,4 +1,5 @@
 import pydot
+import Queue
 
 class TreeNode(object):
 	__id = 0
@@ -95,7 +96,7 @@ class VM(object):
 	def addFlow(self, flow):
 		if flow not in self.flows:
 			self.flows.append(flow)
-		flow.vm = self
+		flow.setVM(self)
 
 	def getFlows(self):
 		return self.flows
@@ -107,7 +108,7 @@ class VM(object):
 		return self.host
 
 	def getTotalshowFlowCapacity(self):
-		return sum(f.amount for f in self.flows)
+		return sum(f.getCapacity() for f in self.flows)
 
 	def getFullName(self):
 		return self.getName()
@@ -137,6 +138,7 @@ class Flow(object):
 			which may be on another host machine.
 		'''
 		self.amount = amount
+		self.capacity = amount
 		self.host = host
 
 		self.reset()
@@ -146,33 +148,35 @@ class Flow(object):
 
 	def reset(self):
 		self.vm = None
+		self.amount = self.capacity
 		self.hops = [self.host]
 
 	def getName(self, amount=None, capacity=None):
 		ret = 'f%d' % (self.id)
 		if amount and capacity:
-			ret += '\n(%.2f/%.2f)' % (self.getAmount(), self.amount)
+			ret += '\n(%.2f/%.2f)' % (self.getAmount(), self.getCapacity())
 		elif amount:
 			ret += '\n(%.2f)' % (self.getAmount())
 		elif capacity:
-			ret += '\n(%.2f)' % (self.amount)
+			ret += '\n(%.2f)' % (self.getCapacity())
 		return ret
 
 	def getFullName(self):
-		return 'f%d (%.2f/%.2f)' % (self.id, self.getAmount(), self.amount)
+		return 'f%d (%.2f/%.2f)' % (self.id, self.getAmount(), self.getCapacity())
 
 	def setVM(self, vm):
 		assert isinstance(vm, VM)
-		vm.addFlow(self)
 		self.vm = vm
+		self.amount = 0
 
 	def getVm(self):
 		return self.vm
 
 	def getAmount(self):
-		if self.vm:
-			return 0
 		return self.amount
+
+	def getCapacity(self):
+		return self.capacity
 
 	def getHost(self):
 		return self.host
@@ -229,7 +233,7 @@ class Host(TreeNode):
 	def getName(self, showFlowCapacity=None):
 		ret = 'h%d' % (self.id)
 		if showFlowCapacity:
-			ret += '\n(%.2f)' % (sum(f.amount for f in self.flows))
+			ret += '\n(%.2f)' % (sum(f.getCapacity() for f in self.flows))
 		return ret
 
 	def getFullName(self):
@@ -303,7 +307,7 @@ class Tree(object):
 	def getTotalFlowAmount(self):
 		amount = 0
 		for h in self.getHosts():
-			amount += sum(f.amount for f in h.getFlows())
+			amount += sum(f.getCapacity() for f in h.getFlows())
 		return amount
 
 	def draw(self, filename, showFlowAmount=None, showFlowCapacity=None, showFlowVm=None):

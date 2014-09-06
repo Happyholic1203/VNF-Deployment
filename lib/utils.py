@@ -1,6 +1,7 @@
 from solver import *
 from ds import *
 import random
+import time
 
 class TestCase(object):
 	def __init__(self, name, flowSettings=None,
@@ -63,7 +64,7 @@ class TestCase(object):
 		allFlows = self.tree.getFlows()
 		numFlows = len(allFlows)
 		numHosts = len(self.tree.getHosts())
-		flowAmounts = [f.amount for f in allFlows]
+		flowAmounts = [f.getCapacity() for f in allFlows]
 		flowsPerHostList = [len(flows) for flows in [h.getFlows() for h in self.tree.getHosts()]]
 		totalFlowAmount = self.tree.getTotalFlowAmount()
 		print '** TestCase: %s' % self.name
@@ -98,10 +99,13 @@ class TestCase(object):
 
 		records = []
 		for solver in solvers:
+			startTime = time.time()
 			solver.solve(self.tree)
+			print '** Runtime [%s]: %.2f seconds' % \
+				(solver.getName(), time.time() - startTime)
 			if drawPng:
 				self.tree.draw(
-					'%s/%s.png (%s)' % (pngOutputDir, self.name, solver.getName()),
+					'%s/%s(%s).png' % (pngOutputDir, self.name, solver.getName()),
 					showFlowCapacity=True,
 					showFlowVm=True)
 			records.append({
