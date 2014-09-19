@@ -115,20 +115,48 @@ class Solver(object):
                 flows.append(f)
         return flows
 
+    @staticmethod
+    def findLargestFlowIdxSmallerThan(flows, amount):
+        '''
+            Assumes that `flows` is sorted in descending order.
+        '''
+        if len(flows) == 0:
+            return -1
+
+        higherBound = 0
+        lowerBound = len(flows) - 1
+        if flows[lowerBound].getAmount() > amount:
+            return -1
+        # necessary
+        if flows[higherBound].getAmount() <= amount:
+            return higherBound
+        while 1:
+            m = (higherBound + lowerBound) >> 1
+            if flows[m].getAmount() > amount:
+                higherBound = m
+            else:
+                lowerBound = m
+            if abs(higherBound - lowerBound) <= 1:
+                return lowerBound
+
     def findMaximumFlowSetOnFlows(self, flows):
+        '''
+            Uses first-fit algorithm.
+        '''
         amount = 0
+        slack = 1
         maxFlowSet = []
         sortedFlows = sorted(flows, reverse=True)
-        for f in sortedFlows:
-            if amount + f.getAmount() > 1:
-                # early stop for better efficiency
-                if amount + sortedFlows[-1].getAmount() > 1:
-                    break
-                else:
-                    continue
-            if f.getAmount() > 0:
-                amount += f.getAmount()
-                maxFlowSet.append(f)
+        while 1:
+            idx = self.findLargestFlowIdxSmallerThan(sortedFlows, slack)
+            if idx == -1:
+                break
+
+            if sortedFlows[idx].getAmount() > 0:
+                amount += sortedFlows[idx].getAmount()
+                slack -= sortedFlows[idx].getAmount()
+                maxFlowSet.append(sortedFlows[idx])
+                sortedFlows.pop(idx)
         return maxFlowSet
 
     def getSolution(self, showVmPlacement=True, showSummary=True):
