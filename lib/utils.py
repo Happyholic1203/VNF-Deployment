@@ -26,7 +26,10 @@ class TestCase(object):
                 }
             ]
 
+        print '> Building tree... (depth = %d, fanout = %d, maxNumFlowsPerHost = %d)'\
+            % (self.depth, self.fanout, self.maxNumFlowsPerHost)
         self.tree = self.buildTree(self.depth, self.fanout)
+        print '> Done building tree'
 
     def reset(self):
         self.tree.reset()

@@ -2,6 +2,11 @@
 from lib.solver import *
 from lib.ds import *
 from lib.utils import *
+import os
+import sys
+
+unbuffered = os.fdopen(sys.stdout.fileno(), 'w', 0)
+sys.stdout = unbuffered
 
 if __name__ == '__main__':
     proposedSolver02 = AlphaSolver(alpha=0.2)
